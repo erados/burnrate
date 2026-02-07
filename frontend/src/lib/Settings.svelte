@@ -24,12 +24,9 @@
     } catch (e) {
       console.error('Failed to load config:', e);
     }
-
     try {
       apiKey = await invoke('load_api_key');
-    } catch {
-      // No key stored yet
-    }
+    } catch {}
   });
 
   async function save() {
@@ -56,51 +53,57 @@
 </script>
 
 <div class="settings">
-  <section class="card">
-    <h2>🔑 API Configuration</h2>
-    <label>
-      <span>Anthropic API Key</span>
-      <input type="password" bind:value={apiKey} placeholder="sk-ant-..." />
-    </label>
-    <label>
-      <span>Organization ID</span>
-      <input type="text" bind:value={orgId} placeholder="org-..." />
-    </label>
-  </section>
+  <div class="grid">
+    <section class="card">
+      <h2>🔑 API</h2>
+      <label>
+        <span>API Key</span>
+        <input type="password" bind:value={apiKey} placeholder="sk-ant-..." />
+      </label>
+      <label>
+        <span>Org ID</span>
+        <input type="text" bind:value={orgId} placeholder="org-..." />
+      </label>
+    </section>
 
-  <section class="card">
-    <h2>⚙️ Preferences</h2>
-    <label>
-      <span>Poll interval (seconds)</span>
-      <input type="number" bind:value={pollInterval} min="60" max="3600" step="60" />
-    </label>
-    <label>
-      <span>Monthly budget ($)</span>
-      <input type="number" bind:value={monthlyLimit} min="1" step="5" />
-    </label>
-    <label>
-      <span>Display mode</span>
-      <select bind:value={displayMode}>
-        <option value="all">Show all metrics</option>
-        <option value="critical">Show most critical only</option>
-      </select>
-    </label>
-  </section>
+    <section class="card">
+      <h2>⚙️ Preferences</h2>
+      <label>
+        <span>Poll (sec)</span>
+        <input type="number" bind:value={pollInterval} min="60" max="3600" step="60" />
+      </label>
+      <label>
+        <span>Budget ($)</span>
+        <input type="number" bind:value={monthlyLimit} min="1" step="5" />
+      </label>
+    </section>
 
-  <section class="card">
-    <h2>🔔 Alert Thresholds</h2>
-    <label>
-      <span>Session alert at (%)</span>
-      <input type="number" bind:value={sessionThreshold} min="50" max="100" />
-    </label>
-    <label>
-      <span>Monthly alert at (%)</span>
-      <input type="number" bind:value={monthlyThreshold} min="50" max="100" />
-    </label>
-  </section>
+    <section class="card">
+      <h2>🔔 Alerts</h2>
+      <label>
+        <span>Session (%)</span>
+        <input type="number" bind:value={sessionThreshold} min="50" max="100" />
+      </label>
+      <label>
+        <span>Monthly (%)</span>
+        <input type="number" bind:value={monthlyThreshold} min="50" max="100" />
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>🖥️ Display</h2>
+      <label>
+        <span>Mode</span>
+        <select bind:value={displayMode}>
+          <option value="all">All metrics</option>
+          <option value="critical">Critical only</option>
+        </select>
+      </label>
+    </section>
+  </div>
 
   <button class="save-btn" on:click={save}>
-    {saved ? '✅ Saved!' : 'Save Settings'}
+    {saved ? '✅ Saved!' : 'Save'}
   </button>
 
   {#if error}
@@ -112,42 +115,50 @@
   .settings {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   .card {
     background: #16162a;
     border: 1px solid #2a2a4a;
     border-radius: 10px;
-    padding: 14px;
+    padding: 10px;
   }
 
   h2 {
-    font-size: 14px;
-    margin: 0 0 12px 0;
+    font-size: 11px;
+    margin: 0 0 8px 0;
     font-weight: 600;
+    color: #8a8aaa;
   }
 
   label {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
-    font-size: 13px;
+    margin-bottom: 6px;
+    font-size: 11px;
   }
 
   label span {
-    flex: 1;
+    flex-shrink: 0;
+    margin-right: 6px;
   }
 
   input, select {
-    width: 160px;
-    padding: 6px 10px;
+    width: 100px;
+    padding: 4px 6px;
     background: #1a1a2e;
     border: 1px solid #3a3a5a;
-    border-radius: 6px;
+    border-radius: 5px;
     color: #e0e0e0;
-    font-size: 13px;
+    font-size: 11px;
   }
 
   input:focus, select:focus {
@@ -157,15 +168,14 @@
 
   .save-btn {
     width: 100%;
-    padding: 10px;
+    padding: 8px;
     background: #818cf8;
     color: white;
     border: none;
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
   }
 
   .save-btn:hover {
@@ -174,8 +184,7 @@
 
   .error {
     color: #ef4444;
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
-    margin-top: 8px;
   }
 </style>

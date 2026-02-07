@@ -240,7 +240,7 @@ pub fn run() {
             // Build tray icon
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
-                .icon_as_template(true)
+                .icon_as_template(false)
                 .title("⚡0% | 📅0% | 💰$0/$50")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id().as_ref() {
@@ -255,7 +255,7 @@ pub fn run() {
                                 tauri::WebviewUrl::App("index.html".into()),
                             )
                             .title("BurnRate")
-                            .inner_size(400.0, 520.0)
+                            .inner_size(420.0, 400.0)
                             .resizable(false)
                             .build();
                         }
@@ -278,7 +278,7 @@ pub fn run() {
                                 tauri::WebviewUrl::App("index.html".into()),
                             )
                             .title("BurnRate")
-                            .inner_size(400.0, 520.0)
+                            .inner_size(420.0, 400.0)
                             .resizable(false)
                             .build();
                         }
