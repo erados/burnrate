@@ -17,9 +17,6 @@
     last_updated: string;
   };
 
-  $: tokensK = (usage.today_tokens / 1000).toFixed(1);
-  $: opusK = (usage.opus_tokens / 1000).toFixed(1);
-  $: sonnetK = (usage.sonnet_tokens / 1000).toFixed(1);
   $: sessionColor = usage.session_percent >= 80 ? '#ef4444' : usage.session_percent >= 50 ? '#f59e0b' : '#4ade80';
   $: weeklyColor = usage.weekly_all_percent >= 80 ? '#ef4444' : usage.weekly_all_percent >= 50 ? '#f59e0b' : '#818cf8';
   $: sonnetColor = usage.weekly_sonnet_percent >= 80 ? '#ef4444' : usage.weekly_sonnet_percent >= 50 ? '#f59e0b' : '#38bdf8';
@@ -35,11 +32,6 @@
     if (h > 0) return `${h}h ${m}m`;
     return `${m}m`;
   }
-
-  // Days remaining in month
-  $: daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-  $: dayOfMonth = new Date().getDate();
-  $: daysRemaining = daysInMonth - dayOfMonth;
 
   async function openLogin() {
     try {
@@ -98,50 +90,25 @@
     {/if}
   </section>
 
-  <!-- Monthly -->
+  <!-- Extra Usage -->
   <section class="card">
-    <h2>💰 Monthly</h2>
-    {#if usage.web_connected && usage.monthly_limit > 0}
-      <div class="big-num" style="color: {monthlyColor}">
-        ${usage.monthly_cost.toFixed(2)}<span class="unit">/ ${usage.monthly_limit.toFixed(0)}</span>
-      </div>
-      <ProgressBar value={monthlyPercent} color={monthlyColor} warningAt={50} dangerAt={80} />
-      <div class="stat-row">
-        <span>{daysRemaining} days left</span>
-        <span>{monthlyPercent.toFixed(0)}%</span>
-      </div>
+    <h2>💰 Extra Usage</h2>
+    {#if usage.web_connected && usage.monthly_cost > 0}
+      {#if usage.monthly_limit > 0}
+        <div class="big-num" style="color: {monthlyColor}">
+          ${usage.monthly_cost.toFixed(2)}<span class="unit">/ ${usage.monthly_limit.toFixed(0)}</span>
+        </div>
+        <ProgressBar value={monthlyPercent} color={monthlyColor} warningAt={50} dangerAt={80} />
+      {:else}
+        <div class="big-num" style="color: {monthlyColor}">
+          ${usage.monthly_cost.toFixed(2)}<span class="unit">used</span>
+        </div>
+      {/if}
     {:else if usage.web_connected}
-      <div class="big-num" style="color: {monthlyColor}">
-        ${usage.monthly_cost.toFixed(2)}
-      </div>
-      <div class="stat-row"><span>{daysRemaining} days left</span></div>
+      <div class="no-charges">No extra charges</div>
     {:else}
       <div class="placeholder">Login required</div>
     {/if}
-  </section>
-
-  <!-- Local Activity -->
-  <section class="card">
-    <h2>📊 Local Activity</h2>
-    <div class="big-num">{usage.today_messages}<span class="unit">msg</span></div>
-    <div class="stat-row">
-      <span>{tokensK}k tokens</span>
-    </div>
-    <div class="model-bar">
-      {#if usage.opus_tokens > 0}
-        <div class="bar-segment opus" style="flex: {usage.opus_tokens}"></div>
-      {/if}
-      {#if usage.sonnet_tokens > 0}
-        <div class="bar-segment sonnet" style="flex: {usage.sonnet_tokens}"></div>
-      {/if}
-      {#if usage.opus_tokens === 0 && usage.sonnet_tokens === 0}
-        <div class="bar-segment empty"></div>
-      {/if}
-    </div>
-    <div class="stat-row legend">
-      <span><i class="dot opus"></i>{opusK}k</span>
-      <span><i class="dot sonnet"></i>{sonnetK}k</span>
-    </div>
   </section>
 </div>
 
@@ -241,6 +208,13 @@
     margin-top: 4px;
   }
 
+  .no-charges {
+    color: #5a5a7a;
+    font-size: 13px;
+    text-align: center;
+    padding: 12px 0;
+  }
+
   .placeholder {
     color: #5a5a7a;
     font-size: 12px;
@@ -248,37 +222,4 @@
     padding: 16px 0;
   }
 
-  .model-bar {
-    display: flex;
-    height: 6px;
-    border-radius: 3px;
-    overflow: hidden;
-    background: #2a2a4a;
-    margin: 4px 0;
-  }
-
-  .bar-segment {
-    min-width: 2px;
-    transition: flex 0.3s;
-  }
-
-  .bar-segment.opus { background: #818cf8; }
-  .bar-segment.sonnet { background: #38bdf8; }
-  .bar-segment.empty { flex: 1; }
-
-  .legend {
-    font-size: 9px;
-  }
-
-  .dot {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    margin-right: 3px;
-    vertical-align: middle;
-  }
-
-  .dot.opus { background: #818cf8; }
-  .dot.sonnet { background: #38bdf8; }
 </style>

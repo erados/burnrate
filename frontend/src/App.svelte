@@ -81,7 +81,7 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: #1a1a2e;
     color: #e0e0e0;
-    overflow: hidden;
+    overflow-y: auto;
   }
 
   main {

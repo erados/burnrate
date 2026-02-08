@@ -3,7 +3,6 @@
   import { invoke } from '@tauri-apps/api/core';
 
   let pollInterval = 60;
-  let displayMode = 'all';
   let saved = false;
   let error = '';
 
@@ -11,7 +10,6 @@
     try {
       const config: any = await invoke('get_config');
       pollInterval = config.poll_interval_secs;
-      displayMode = config.display_mode;
     } catch (e) {
       console.error('Failed to load config:', e);
     }
@@ -24,7 +22,6 @@
       await invoke('save_config', {
         config: {
           poll_interval_secs: pollInterval,
-          display_mode: displayMode,
         },
       });
       saved = true;
@@ -67,16 +64,6 @@
   </section>
 
   <section class="card">
-    <h2>📁 Local Data</h2>
-    <div class="info">
-      Also reads from <code>~/.claude/</code> for local activity
-    </div>
-    <div class="info dim">
-      Session JSONL files for message/token counts
-    </div>
-  </section>
-
-  <section class="card">
     <h2>⚙️ Preferences</h2>
     <label>
       <span>Poll interval</span>
@@ -85,13 +72,6 @@
         <option value={60}>1 min</option>
         <option value={120}>2 min</option>
         <option value={300}>5 min</option>
-      </select>
-    </label>
-    <label>
-      <span>Display</span>
-      <select bind:value={displayMode}>
-        <option value="all">All metrics</option>
-        <option value="compact">Compact</option>
       </select>
     </label>
   </section>

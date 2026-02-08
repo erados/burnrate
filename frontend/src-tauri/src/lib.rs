@@ -198,6 +198,23 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
             return false; // Don't navigate to burnrate:// URL
         }
 
+        // After login, if user lands on claude.ai main page, redirect to usage
+        // This handles: claude.ai, claude.ai/new, claude.ai/chat*, etc.
+        if (url_str == "https://claude.ai/"
+            || url_str == "https://claude.ai"
+            || url_str.starts_with("https://claude.ai/new")
+            || url_str.starts_with("https://claude.ai/chat"))
+            && !url_str.contains("/settings/")
+        {
+            let handle = app_handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if let Some(w) = handle.get_webview_window("scraper") {
+                    let _ = w.eval("window.location.href = 'https://claude.ai/settings/usage';");
+                }
+            });
+        }
+
         // Allow all normal navigation (https, http, about, etc.)
         true
     })
@@ -213,8 +230,7 @@ fn build_scrape_inject_js() -> String {
         r#"
         (function() {{
             try {{
-                const result = (function() {{ {scrape_js} }})();
-                const jsonStr = (typeof result === 'string') ? result : JSON.stringify(result);
+                const jsonStr = {scrape_js};
                 const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
                 window.location.href = 'burnrate://result/' + encoded;
             }} catch(e) {{
@@ -228,20 +244,27 @@ fn build_scrape_inject_js() -> String {
 
 fn format_tray_title(usage: &UsageData) -> String {
     if usage.web_connected {
-        let cost_str = if usage.monthly_limit > 0.0 {
-            format!("${:.0}/${:.0}", usage.monthly_cost, usage.monthly_limit)
+        let reset_str = if usage.session_reset_minutes <= 0 {
+            String::new()
+        } else if usage.session_reset_minutes < 60 {
+            format!(" {}m", usage.session_reset_minutes)
         } else {
-            format!("${:.0}", usage.monthly_cost)
+            let hours = usage.session_reset_minutes / 60;
+            let mins = usage.session_reset_minutes % 60;
+            if mins == 0 {
+                format!(" {}h", hours)
+            } else {
+                format!(" {}h{}m", hours, mins)
+            }
         };
         format!(
-            "⚡{}% | 📅{}% | 💰{}",
+            "⚡{}%{} | 🔋{}%",
             usage.session_percent as i64,
+            reset_str,
             usage.weekly_all_percent as i64,
-            cost_str,
         )
     } else {
-        let tok_k = usage.today_tokens / 1000;
-        format!("🔥 {}msg | {}k tok", usage.today_messages, tok_k)
+        "🔥 loading...".to_string()
     }
 }
 
@@ -271,7 +294,11 @@ fn start_polling(app: AppHandle) {
                 usage.last_updated = now;
             }
 
-            // Try web scraping if scraper window exists
+            // Try web scraping - create scraper window if needed
+            if app.get_webview_window("scraper").is_none() {
+                let _ = build_scraper_window(&app, false);
+                tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            }
             if let Some(window) = app.get_webview_window("scraper") {
                 // Navigate to usage page if needed
                 let _ = window.eval(
@@ -340,7 +367,7 @@ pub fn run() {
                                 tauri::WebviewUrl::App("index.html".into()),
                             )
                             .title("BurnRate")
-                            .inner_size(440.0, 480.0)
+                            .inner_size(440.0, 520.0)
                             .resizable(false)
                             .build();
                         }
@@ -371,7 +398,7 @@ pub fn run() {
                                 tauri::WebviewUrl::App("index.html".into()),
                             )
                             .title("BurnRate")
-                            .inner_size(440.0, 480.0)
+                            .inner_size(440.0, 520.0)
                             .resizable(false)
                             .build();
                         }
@@ -390,6 +417,11 @@ pub fn run() {
             hide_scraper,
             trigger_scrape,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running BurnRate");
+        .build(tauri::generate_context!())
+        .expect("error while building BurnRate")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                api.prevent_exit();
+            }
+        });
 }

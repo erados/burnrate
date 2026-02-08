@@ -152,113 +152,88 @@ pub fn scraping_js() -> &'static str {
                 raw_texts: []
             };
 
-            // Collect all visible text for debugging
-            const allText = document.body ? document.body.innerText : '';
-            
-            // Strategy: find all progress-bar-like elements and their labels
-            // The usage page has sections with percentages and progress bars
-            
-            // Look for percentage patterns like "X% 사용됨" or "X% used"
-            const percentRegex = /(\d+(?:\.\d+)?)\s*%\s*(사용됨|used)/gi;
-            const percentMatches = [...allText.matchAll(percentRegex)];
-            
-            // Look for reset time "X시간 Y분 후 재설정" or similar
-            const resetRegex = /(\d+)\s*시간\s*(\d+)\s*분\s*후\s*재설정/;
-            const resetMatch = allText.match(resetRegex);
-            if (resetMatch) {
-                result.session_reset_minutes = parseInt(resetMatch[1]) * 60 + parseInt(resetMatch[2]);
+            const t = document.body ? document.body.innerText : '';
+            // Save a snippet for debugging
+            result.raw_texts = [t.substring(0, 500)];
+
+            // Find ALL "X% used" or "X% 사용됨" occurrences in order
+            const pctMatches = [];
+            const pctRe = /(\d+(?:\.\d+)?)\s*%\s*(?:used|사용됨)/gi;
+            let m;
+            while ((m = pctRe.exec(t)) !== null) {
+                pctMatches.push(parseFloat(m[1]));
             }
-            // Also try English pattern
-            const resetRegexEn = /(\d+)\s*h(?:ours?)?\s*(\d+)\s*m(?:in(?:utes?)?)?\s*(?:until reset|remaining)/i;
-            const resetMatchEn = allText.match(resetRegexEn);
-            if (!resetMatch && resetMatchEn) {
-                result.session_reset_minutes = parseInt(resetMatchEn[1]) * 60 + parseInt(resetMatchEn[2]);
+
+            // Also try bare "X%" near section keywords if above fails
+            if (pctMatches.length === 0) {
+                // Try finding percentages from aria/progress elements
+                const bars = document.querySelectorAll('[role="progressbar"], progress, [aria-valuenow]');
+                bars.forEach(b => {
+                    const v = b.getAttribute('aria-valuenow') || b.getAttribute('value');
+                    if (v) pctMatches.push(parseFloat(v));
+                });
             }
-            // Minutes only
-            const resetMinOnly = allText.match(/(\d+)\s*분\s*후\s*재설정/);
-            if (!resetMatch && resetMinOnly) {
-                result.session_reset_minutes = parseInt(resetMinOnly[1]);
+
+            // Assign in order: session, all models, sonnet
+            if (pctMatches.length >= 1) result.session_percent = pctMatches[0];
+            if (pctMatches.length >= 2) result.weekly_all_percent = pctMatches[1];
+            if (pctMatches.length >= 3) result.weekly_sonnet_percent = pctMatches[2];
+
+            // Reset time: "Resets in X hr Y min" or just "X hr Y min"
+            const rHM = t.match(/[Rr]esets?\s+in\s+(\d+)\s*h[r]?\s+(\d+)\s*min/);
+            if (rHM) {
+                result.session_reset_minutes = parseInt(rHM[1]) * 60 + parseInt(rHM[2]);
+            } else {
+                // Hours only: "Resets in 3 hr"
+                const rH = t.match(/[Rr]esets?\s+in\s+(\d+)\s*h[r]?/);
+                if (rH) result.session_reset_minutes = parseInt(rH[1]) * 60;
+                // Minutes only: "Resets in 45 min"
+                const rM = t.match(/[Rr]esets?\s+in\s+(\d+)\s*min/);
+                if (rM) result.session_reset_minutes = parseInt(rM[1]);
             }
-            
-            // Look for cost pattern "US$XX.XX 사용" or "$XX.XX used"
-            const costRegex = /(?:US)?\$\s*(\d+(?:\.\d+)?)\s*(사용|used)/i;
-            const costMatch = allText.match(costRegex);
-            if (costMatch) {
-                result.monthly_cost = parseFloat(costMatch[1]);
+            // Korean fallback
+            if (result.session_reset_minutes === 0) {
+                const rK = t.match(/(\d+)\s*시간\s*(\d+)\s*분\s*후/);
+                if (rK) result.session_reset_minutes = parseInt(rK[1]) * 60 + parseInt(rK[2]);
             }
-            
-            // Look for limit like "US$50" or "/ $50"
-            const limitRegex = /(?:\/|of)\s*(?:US)?\$\s*(\d+(?:\.\d+)?)/i;
-            const limitMatch = allText.match(limitRegex);
-            if (limitMatch) {
-                result.monthly_limit = parseFloat(limitMatch[1]);
+
+            // Extra usage / monthly cost scraping
+            // Try multiple patterns for cost and limit
+
+            // Pattern 1: "$XX.XX used" or "US$XX.XX used"
+            const costM = t.match(/(?:US)?\$\s*(\d+(?:\.\d+)?)\s*(?:used|사용)/i);
+            if (costM) result.monthly_cost = parseFloat(costM[1]);
+
+            // Pattern 2: "$X.XX / $XX.XX" (cost / limit format)
+            const slashM = t.match(/\$\s*(\d+(?:\.\d+)?)\s*\/\s*\$\s*(\d+(?:\.\d+)?)/);
+            if (slashM) {
+                result.monthly_cost = parseFloat(slashM[1]);
+                result.monthly_limit = parseFloat(slashM[2]);
             }
-            // Also try standalone limit pattern
-            if (!limitMatch) {
-                const standaloneLimitRegex = /(?:US)?\$(\d+(?:\.\d+)?)\s*(?:한도|limit)/i;
-                const standaloneMatch = allText.match(standaloneLimitRegex);
-                if (standaloneMatch) {
-                    result.monthly_limit = parseFloat(standaloneMatch[1]);
+
+            // Pattern 3: "of $XX" or "/ $XX" for limit
+            if (result.monthly_limit === 0) {
+                const limitM = t.match(/(?:\/|of)\s*(?:US)?\$\s*(\d+(?:\.\d+)?)/i);
+                if (limitM) result.monthly_limit = parseFloat(limitM[1]);
+            }
+
+            // Pattern 4: Look near "Extra usage" or "extra" section for dollar amounts
+            const extraIdx = t.toLowerCase().indexOf('extra usage');
+            if (extraIdx !== -1) {
+                const extraSection = t.substring(extraIdx, extraIdx + 300);
+                const dollarMatches = [...extraSection.matchAll(/\$\s*(\d+(?:\.\d+)?)/g)];
+                if (dollarMatches.length >= 2 && result.monthly_cost === 0) {
+                    result.monthly_cost = parseFloat(dollarMatches[0][1]);
+                    result.monthly_limit = parseFloat(dollarMatches[1][1]);
+                } else if (dollarMatches.length >= 1 && result.monthly_limit === 0) {
+                    result.monthly_limit = parseFloat(dollarMatches[0][1]);
                 }
             }
 
-            // Try to find sections by looking at the DOM structure
-            // Claude.ai usage page typically has sections with headers
-            const sections = document.querySelectorAll('[class*="usage"], [class*="section"], [class*="card"], [class*="panel"], section, [role="region"]');
-            
-            // More robust: find all elements containing percentage text
-            const walker = document.createTreeWalker(
-                document.body,
-                NodeFilter.SHOW_TEXT,
-                null,
-                false
-            );
-            
-            let textNodes = [];
-            let node;
-            while (node = walker.nextNode()) {
-                const text = node.textContent.trim();
-                if (text && (text.includes('%') || text.includes('$') || text.includes('재설정') || text.includes('reset'))) {
-                    textNodes.push({
-                        text: text,
-                        parent: node.parentElement ? node.parentElement.closest('[class]')?.className || '' : ''
-                    });
-                }
-            }
-            
-            result.raw_texts = textNodes.slice(0, 20);
-
-            // Try to identify sections by their headings
-            // Look for heading elements near percentage elements
-            const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, [class*="heading"], [class*="title"], [class*="label"]');
-            let currentSection = '';
-            let sectionPercents = {};
-            
-            for (const heading of headings) {
-                const headText = heading.textContent.trim().toLowerCase();
-                // Find the next sibling or nearby element with a percentage
-                const parent = heading.closest('div, section, [class*="card"]');
-                if (parent) {
-                    const pctMatch = parent.textContent.match(/(\d+(?:\.\d+)?)\s*%/);
-                    if (pctMatch) {
-                        const pct = parseFloat(pctMatch[1]);
-                        if (headText.includes('session') || headText.includes('세션') || headText.includes('current')) {
-                            result.session_percent = pct;
-                        } else if (headText.includes('all model') || headText.includes('모든 모델') || headText.includes('전체')) {
-                            result.weekly_all_percent = pct;
-                        } else if (headText.includes('sonnet')) {
-                            result.weekly_sonnet_percent = pct;
-                        }
-                    }
-                }
-            }
-
-            // Fallback: assign percentages by order if we found them via regex
-            if (result.session_percent === 0 && percentMatches.length > 0) {
-                // Usually: session %, all models %, sonnet %
-                if (percentMatches.length >= 1) result.session_percent = parseFloat(percentMatches[0][1]);
-                if (percentMatches.length >= 2) result.weekly_all_percent = parseFloat(percentMatches[1][1]);
-                if (percentMatches.length >= 3) result.weekly_sonnet_percent = parseFloat(percentMatches[2][1]);
+            // Pattern 5: "Limit: $XX" or "limit of $XX"
+            const limitPattern = t.match(/limit(?:\s+of)?\s*:?\s*\$\s*(\d+(?:\.\d+)?)/i);
+            if (limitPattern && result.monthly_limit === 0) {
+                result.monthly_limit = parseFloat(limitPattern[1]);
             }
 
             return JSON.stringify(result);
