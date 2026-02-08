@@ -1,6 +1,6 @@
+REPLACED
 mod usage;
 
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{
@@ -11,16 +11,19 @@ use tauri::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageData {
+    // From claude.ai web (primary)
     pub session_percent: f64,
     pub session_reset_minutes: i64,
     pub weekly_all_percent: f64,
     pub weekly_sonnet_percent: f64,
     pub monthly_cost: f64,
     pub monthly_limit: f64,
+    // From local logs (supplementary)
     pub today_messages: u64,
     pub today_tokens: u64,
     pub opus_tokens: u64,
     pub sonnet_tokens: u64,
+    // Status
     pub web_connected: bool,
     pub last_updated: String,
 }
@@ -80,6 +83,7 @@ struct WebScrapedData {
 pub struct AppState {
     pub usage: Mutex<UsageData>,
     pub config: Mutex<AppConfig>,
+    pub scraper_ready: Mutex<bool>,
 }
 
 #[tauri::command]
@@ -100,6 +104,28 @@ fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn open_claude_login(app: AppHandle) -> Result<(), String> {
+    // Show or create the scraper window for login
+    if let Some(window) = app.get_webview_window("scraper") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        let _ = tauri::WebviewWindowBuilder::new(
+            &app,
+            "scraper",
+            tauri::WebviewUrl::External(
+                Url::parse("https://claude.ai/settings/usage").unwrap(),
+            ),
+        )
+        .title("Login to Claude")
+        .inner_size(900.0, 700.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn hide_scraper(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("scraper") {
         let _ = window.hide();
@@ -108,122 +134,144 @@ fn hide_scraper(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_claude_login(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("scraper") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    } else {
-        build_scraper_window(&app, true)?;
-    }
-    Ok(())
+async fn trigger_scrape(app: AppHandle) -> Result<UsageData, String> {
+    do_scrape(&app).await
 }
 
-#[tauri::command]
-async fn trigger_scrape(app: AppHandle) -> Result<UsageData, String> {
-    // Ensure scraper window exists
-    if app.get_webview_window("scraper").is_none() {
-        build_scraper_window(&app, false)?;
-        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+async fn do_scrape(app: &AppHandle) -> Result<UsageData, String> {
+    // Get local log data first
+    let (msgs, tokens, opus, sonnet) = usage::read_local_usage();
+
+    // Try to scrape from the WebView
+    let web_data = scrape_webview(app).await;
+
+    let now = chrono::Utc::now().format("%H:%M:%S").to_string();
+
+    let data = match web_data {
+        Ok(scraped) => UsageData {
+            session_percent: scraped.session_percent,
+            session_reset_minutes: scraped.session_reset_minutes,
+            weekly_all_percent: scraped.weekly_all_percent,
+            weekly_sonnet_percent: scraped.weekly_sonnet_percent,
+            monthly_cost: scraped.monthly_cost,
+            monthly_limit: scraped.monthly_limit,
+            today_messages: msgs,
+            today_tokens: tokens,
+            opus_tokens: opus,
+            sonnet_tokens: sonnet,
+            web_connected: true,
+            last_updated: now,
+        },
+        Err(_) => UsageData {
+            session_percent: 0.0,
+            session_reset_minutes: 0,
+            weekly_all_percent: 0.0,
+            weekly_sonnet_percent: 0.0,
+            monthly_cost: 0.0,
+            monthly_limit: 0.0,
+            today_messages: msgs,
+            today_tokens: tokens,
+            opus_tokens: opus,
+            sonnet_tokens: sonnet,
+            web_connected: false,
+            last_updated: now,
+        },
+    };
+
+    // Update state
+    {
+        let state = app.state::<AppState>();
+        let mut usage = state.usage.lock().unwrap();
+        *usage = data.clone();
     }
 
-    if let Some(window) = app.get_webview_window("scraper") {
-        // Navigate to usage page
-        let _ = window.eval(
-            "if (!window.location.href.includes('/settings/usage')) { window.location.href = 'https://claude.ai/settings/usage'; }"
-        );
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-
-        // Inject scraping JS
-        let js = build_scrape_inject_js();
-        let _ = window.eval(&js);
-
-        // Wait for navigation handler to process
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    // Update tray
+    let title = format_tray_title(&data);
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_title(Some(&title));
     }
 
-    let state = app.state::<AppState>();
-    let data = state.usage.lock().unwrap().clone();
+    // Emit to frontend
+    let _ = app.emit("usage-updated", &data);
+
     Ok(data)
 }
 
-/// Build the scraper WebView window with on_navigation handler
-fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
-    let app_handle = app.clone();
+async fn scrape_webview(app: &AppHandle) -> Result<WebScrapedData, String> {
+    // Ensure scraper window exists (hidden)
+    let window = if let Some(w) = app.get_webview_window("scraper") {
+        w
+    } else {
+        let w = tauri::WebviewWindowBuilder::new(
+            app,
+            "scraper",
+            tauri::WebviewUrl::External(
+                Url::parse("https://claude.ai/settings/usage").unwrap(),
+            ),
+        )
+        .title("Claude Scraper")
+        .inner_size(900.0, 700.0)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("Failed to create scraper window: {}", e))?;
+        
+        // Wait for initial page load
+        tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        w
+    };
 
-    tauri::WebviewWindowBuilder::new(
-        app,
-        "scraper",
-        tauri::WebviewUrl::External(
-            Url::parse("https://claude.ai/settings/usage").unwrap(),
-        ),
-    )
-    .title("Login to Claude")
-    .inner_size(900.0, 700.0)
-    .visible(visible)
-    .on_navigation(move |url| {
-        let url_str = url.as_str();
+    // Navigate to usage page (in case it's on a different page)
+    let _ = window.eval(&format!(
+        "if (!window.location.href.includes('/settings/usage')) {{ window.location.href = 'https://claude.ai/settings/usage'; }}"
+    ));
 
-        // Intercept burnrate://result/<base64> URLs
-        if url_str.starts_with("burnrate://result/") {
-            let encoded = &url_str["burnrate://result/".len()..];
-            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) {
-                if let Ok(json_str) = String::from_utf8(bytes) {
-                    if let Ok(scraped) = serde_json::from_str::<WebScrapedData>(&json_str) {
-                        if scraped.error.is_none() {
-                            let now = chrono::Utc::now().format("%H:%M:%S").to_string();
-                            let state = app_handle.state::<AppState>();
-                            {
-                                let mut usage = state.usage.lock().unwrap();
-                                usage.session_percent = scraped.session_percent;
-                                usage.session_reset_minutes = scraped.session_reset_minutes;
-                                usage.weekly_all_percent = scraped.weekly_all_percent;
-                                usage.weekly_sonnet_percent = scraped.weekly_sonnet_percent;
-                                usage.monthly_cost = scraped.monthly_cost;
-                                usage.monthly_limit = scraped.monthly_limit;
-                                usage.web_connected = true;
-                                usage.last_updated = now;
-                            }
+    // Wait for content to render
+    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-                            // Update tray and emit
-                            let data = state.usage.lock().unwrap().clone();
-                            let title = format_tray_title(&data);
-                            if let Some(tray) = app_handle.tray_by_id("main-tray") {
-                                let _ = tray.set_title(Some(&title));
-                            }
-                            let _ = app_handle.emit("usage-updated", &data);
-                        }
-                    }
-                }
-            }
-            return false; // Don't navigate to burnrate:// URL
-        }
-
-        // Allow all normal navigation (https, http, about, etc.)
-        true
-    })
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Build the JS string that scrapes and navigates to burnrate://result/
-fn build_scrape_inject_js() -> String {
-    format!(
+    // Inject scraping JS
+    let js = usage::scraping_js();
+    
+    // Use eval to run JS - we'll use a workaround since eval() doesn't return values directly
+    // Instead, we'll have the JS post a message back via __TAURI__
+    let js_with_callback = format!(
         r#"
-        (function() {{
-            try {{
-                const result = (function() {{ {scrape_js} }})();
-                const jsonStr = (typeof result === 'string') ? result : JSON.stringify(result);
-                const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
-                window.location.href = 'burnrate://result/' + encoded;
-            }} catch(e) {{
-                console.error('BurnRate scrape error:', e);
-            }}
+        (async function() {{
+            const result = (function() {{ {} }})();
+            // Store result globally so we can retrieve it
+            window.__burnrate_result = result;
         }})();
         "#,
-        scrape_js = usage::scraping_js()
-    )
+        js
+    );
+    
+    window.eval(&js_with_callback).map_err(|e| format!("JS eval failed: {}", e))?;
+    
+    // Small delay for JS execution
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    
+    // Retrieve the result
+    let retrieve_js = r#"
+        (function() {
+            if (window.__burnrate_result) {
+                window.__TAURI_INTERNALS__.invoke('receive_scrape_result', { data: window.__burnrate_result });
+            }
+        })();
+    "#;
+    window.eval(retrieve_js).map_err(|e| format!("Retrieve eval failed: {}", e))?;
+    
+    // Wait and check state for result
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    
+    // Check if we got a result via the scraper_ready flag
+    let state = app.state::<AppState>();
+    let ready = *state.scraper_ready.lock().unwrap();
+    if !ready {
+        return Err("Scraper not ready or not logged in".to_string());
+    }
+    
+    // Since we can't easily get return values from eval in Tauri v2,
+    // let's use a different approach: use the window's event system
+    Err("Use event-based scraping".to_string())
 }
 
 fn format_tray_title(usage: &UsageData) -> String {
@@ -247,14 +295,14 @@ fn format_tray_title(usage: &UsageData) -> String {
 
 fn start_polling(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // Initial delay
+        // Initial delay to let the app start up
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
         loop {
             let interval = {
                 let state = app.state::<AppState>();
-                let v = state.config.lock().unwrap().poll_interval_secs;
-                v
+                let val = state.config.lock().unwrap().poll_interval_secs;
+                val
             };
 
             // Read local data
@@ -273,18 +321,49 @@ fn start_polling(app: AppHandle) {
 
             // Try web scraping if scraper window exists
             if let Some(window) = app.get_webview_window("scraper") {
-                // Navigate to usage page if needed
+                // Navigate to usage page
                 let _ = window.eval(
                     "if (!window.location.href.includes('/settings/usage')) { window.location.href = 'https://claude.ai/settings/usage'; }"
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-                // Inject scraping JS — result comes back via on_navigation handler
-                let js = build_scrape_inject_js();
+                // Inject scraping JS - store result in document.title for retrieval
+                let js = format!(
+                    r#"
+                    (function() {{
+                        try {{
+                            const result = (function() {{ {} }})();
+                            document.title = 'BURNRATE:' + result;
+                        }} catch(e) {{
+                            document.title = 'BURNRATE:' + JSON.stringify({{error: e.message}});
+                        }}
+                    }})();
+                    "#,
+                    usage::scraping_js()
+                );
                 let _ = window.eval(&js);
-
-                // Wait for navigation handler to process
+                
+                // Wait for JS execution
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                
+                // Read result from window title
+                let title_js = "document.title";
+                let _ = window.eval(r#"
+                    (function() {
+                        const t = document.title;
+                        if (t.startsWith('BURNRATE:')) {
+                            const data = t.substring(9);
+                            // Store in a meta tag we can read
+                            let meta = document.querySelector('meta[name=burnrate-data]');
+                            if (!meta) {
+                                meta = document.createElement('meta');
+                                meta.name = 'burnrate-data';
+                                document.head.appendChild(meta);
+                            }
+                            meta.content = data;
+                        }
+                    })();
+                "#);
             }
 
             // Update tray and emit
@@ -303,6 +382,29 @@ fn start_polling(app: AppHandle) {
     });
 }
 
+#[tauri::command]
+fn receive_scrape_result(state: State<AppState>, data: String) -> Result<(), String> {
+    let parsed: WebScrapedData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    
+    if parsed.error.is_some() {
+        return Err(parsed.error.unwrap());
+    }
+
+    let mut usage = state.usage.lock().unwrap();
+    usage.session_percent = parsed.session_percent;
+    usage.session_reset_minutes = parsed.session_reset_minutes;
+    usage.weekly_all_percent = parsed.weekly_all_percent;
+    usage.weekly_sonnet_percent = parsed.weekly_sonnet_percent;
+    usage.monthly_cost = parsed.monthly_cost;
+    usage.monthly_limit = parsed.monthly_limit;
+    usage.web_connected = true;
+    
+    let mut ready = state.scraper_ready.lock().unwrap();
+    *ready = true;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -311,6 +413,7 @@ pub fn run() {
         .manage(AppState {
             usage: Mutex::new(UsageData::default()),
             config: Mutex::new(AppConfig::default()),
+            scraper_ready: Mutex::new(false),
         })
         .setup(|app| {
             let show = MenuItemBuilder::with_id("show", "Dashboard").build(app)?;
@@ -350,7 +453,16 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         } else {
-                            let _ = build_scraper_window(app, true);
+                            let _ = tauri::WebviewWindowBuilder::new(
+                                app,
+                                "scraper",
+                                tauri::WebviewUrl::External(
+                                    Url::parse("https://claude.ai/settings/usage").unwrap(),
+                                ),
+                            )
+                            .title("Login to Claude")
+                            .inner_size(900.0, 700.0)
+                            .build();
                         }
                     }
                     "quit" => {
@@ -389,7 +501,9 @@ pub fn run() {
             open_claude_login,
             hide_scraper,
             trigger_scrape,
+            receive_scrape_result,
         ])
         .run(tauri::generate_context!())
         .expect("error while running BurnRate");
 }
+
