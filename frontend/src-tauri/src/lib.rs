@@ -20,6 +20,7 @@ pub struct UsageData {
     pub weekly_messages: u64,
     pub usage_percent: f64,      // estimated 5h window usage
     pub last5h_tokens: u64,
+    pub last_active_date: String,
 }
 
 impl Default for UsageData {
@@ -35,6 +36,7 @@ impl Default for UsageData {
             weekly_messages: 0,
             usage_percent: 0.0,
             last5h_tokens: 0,
+            last_active_date: String::new(),
         }
     }
 }
@@ -78,7 +80,21 @@ fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), String> 
 
 fn format_tray_title(usage: &UsageData) -> String {
     let tok_k = usage.today_tokens / 1000;
-    format!("🔥 {}msg | {}k tok", usage.today_messages, tok_k)
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    if !usage.last_active_date.is_empty() && usage.last_active_date != today {
+        let short = format_short_date(&usage.last_active_date);
+        format!("🔥 {}msg | {}k tok ({})", usage.today_messages, tok_k, short)
+    } else {
+        format!("🔥 {}msg | {}k tok", usage.today_messages, tok_k)
+    }
+}
+
+fn format_short_date(date_str: &str) -> String {
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+        date.format("%b %-d").to_string()
+    } else {
+        date_str.to_string()
+    }
 }
 
 fn start_polling(app: AppHandle) {

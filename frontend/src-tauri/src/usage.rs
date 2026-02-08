@@ -98,14 +98,13 @@ fn today_str() -> String {
     Utc::now().format("%Y-%m-%d").to_string()
 }
 
-/// Scan all sessions-index.json files for today's sessions
-fn scan_today_sessions() -> (u64, Vec<String>) {
+/// Scan all sessions-index.json files for sessions on a given date
+fn scan_sessions_for_date(target_date: &str) -> (u64, Vec<String>) {
     let claude = match claude_dir() {
         Some(d) => d,
         None => return (0, vec![]),
     };
     let projects = claude.join("projects");
-    let today = today_str();
     let mut session_count = 0u64;
     let mut jsonl_paths = vec![];
 
@@ -115,10 +114,9 @@ fn scan_today_sessions() -> (u64, Vec<String>) {
             if let Ok(content) = std::fs::read_to_string(&idx) {
                 if let Ok(index) = serde_json::from_str::<SessionsIndex>(&content) {
                     for entry in &index.entries {
-                        // Check if session was active today
                         let created_date = entry.created.get(..10).unwrap_or("");
                         let modified_date = entry.modified.get(..10).unwrap_or("");
-                        if created_date == today || modified_date == today {
+                        if created_date == target_date || modified_date == target_date {
                             session_count += 1;
                             if !entry.full_path.is_empty() {
                                 jsonl_paths.push(entry.full_path.clone());
@@ -211,11 +209,11 @@ pub fn read_local_usage() -> UsageData {
     let today = today_str();
     let stats = read_stats_cache();
 
-    // Get today's activity from stats-cache (may be stale)
-    let mut today_messages = 0u64;
-    let mut today_tool_calls = 0u64;
-    let mut today_tokens = 0u64;
-    let mut today_model_tokens: HashMap<String, u64> = HashMap::new();
+    let mut target_messages = 0u64;
+    let mut target_tool_calls = 0u64;
+    let mut target_tokens = 0u64;
+    let mut target_model_tokens: HashMap<String, u64> = HashMap::new();
+    let mut last_active_date = today.clone();
 
     // Weekly data from stats-cache
     let mut weekly_tokens: Vec<(String, u64)> = vec![];
@@ -233,16 +231,29 @@ pub fn read_local_usage() -> UsageData {
             &stats.daily_model_tokens
         };
 
-        // Today from stats cache
-        if let Some(act) = activities.iter().find(|a| a.date == today) {
-            today_messages = act.message_count;
-            today_tool_calls = act.tool_call_count;
+        // Try today first, then find most recent day
+        let target_date = if activities.iter().any(|a| a.date == today && a.message_count > 0)
+            || model_tokens_list.iter().any(|t| t.date == today && t.tokens_by_model.values().sum::<u64>() > 0)
+        {
+            today.clone()
+        } else {
+            // Find most recent date with data
+            let mut dates: Vec<&str> = activities.iter().filter(|a| a.message_count > 0).map(|a| a.date.as_str()).collect();
+            dates.extend(model_tokens_list.iter().filter(|t| t.tokens_by_model.values().sum::<u64>() > 0).map(|t| t.date.as_str()));
+            dates.sort();
+            dates.last().unwrap_or(&today.as_str()).to_string()
+        };
+        last_active_date = target_date.clone();
+
+        if let Some(act) = activities.iter().find(|a| a.date == target_date) {
+            target_messages = act.message_count;
+            target_tool_calls = act.tool_call_count;
         }
-        if let Some(tok) = model_tokens_list.iter().find(|t| t.date == today) {
+        if let Some(tok) = model_tokens_list.iter().find(|t| t.date == target_date) {
             for (model, count) in &tok.tokens_by_model {
                 let key = simplify_model(model);
-                *today_model_tokens.entry(key).or_default() += count;
-                today_tokens += count;
+                *target_model_tokens.entry(key).or_default() += count;
+                target_tokens += count;
             }
         }
 
@@ -261,32 +272,32 @@ pub fn read_local_usage() -> UsageData {
         }
     }
 
-    // Scan JSONL for today's live data (supplements stale stats-cache)
-    let (today_sessions, today_jsonl_paths) = scan_today_sessions();
+    // Scan JSONL for target date's sessions
+    let (target_sessions, target_jsonl_paths) = scan_sessions_for_date(&last_active_date);
 
-    // If stats-cache doesn't have today, use JSONL data
-    if today_messages == 0 && !today_jsonl_paths.is_empty() {
-        let (msgs, tools, tokens, model_toks) = parse_jsonl_files(&today_jsonl_paths, None);
-        today_messages = msgs;
-        today_tool_calls = tools;
-        today_tokens = tokens;
-        today_model_tokens = model_toks;
+    // If stats-cache doesn't have data, use JSONL data
+    if target_messages == 0 && !target_jsonl_paths.is_empty() {
+        let (msgs, tools, tokens, model_toks) = parse_jsonl_files(&target_jsonl_paths, None);
+        target_messages = msgs;
+        target_tool_calls = tools;
+        target_tokens = tokens;
+        target_model_tokens = model_toks;
     }
 
-    // Last 5 hours usage for rate estimate
-    let (_, _, last5h_tokens, _) = if !today_jsonl_paths.is_empty() {
-        parse_jsonl_files(&today_jsonl_paths, Some(5.0))
+    // Last 5 hours usage for rate estimate (only relevant for today)
+    let last5h_tokens = if last_active_date == today && !target_jsonl_paths.is_empty() {
+        let (_, _, tokens, _) = parse_jsonl_files(&target_jsonl_paths, Some(5.0));
+        tokens
     } else {
-        (0, 0, 0, HashMap::new())
+        0
     };
 
-    // Estimated usage percent (rough: assume ~1M tokens/5h session cap)
+    // Estimated usage percent
     let estimated_cap = 1_000_000u64;
     let usage_percent = ((last5h_tokens as f64 / estimated_cap as f64) * 100.0).min(100.0);
 
     // Sort weekly tokens by date
     weekly_tokens.sort_by(|a, b| a.0.cmp(&b.0));
-    // Pad to 7 days
     let mut weekly_daily: Vec<u64> = vec![0; 7];
     let now = Utc::now().date_naive();
     for (date_str, tokens) in &weekly_tokens {
@@ -298,20 +309,20 @@ pub fn read_local_usage() -> UsageData {
         }
     }
 
-    // Model breakdown for today
-    let opus_tokens = *today_model_tokens.get("Opus").unwrap_or(&0);
-    let sonnet_tokens = *today_model_tokens.get("Sonnet").unwrap_or(&0);
+    let opus_tokens = *target_model_tokens.get("Opus").unwrap_or(&0);
+    let sonnet_tokens = *target_model_tokens.get("Sonnet").unwrap_or(&0);
 
     UsageData {
-        today_messages,
-        today_tool_calls,
-        today_sessions,
-        today_tokens,
+        today_messages: target_messages,
+        today_tool_calls: target_tool_calls,
+        today_sessions: target_sessions,
+        today_tokens: target_tokens,
         opus_tokens,
         sonnet_tokens,
         weekly_daily,
         weekly_messages,
         usage_percent,
         last5h_tokens,
+        last_active_date,
     }
 }

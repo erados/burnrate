@@ -12,6 +12,7 @@
     weekly_messages: number;
     usage_percent: number;
     last5h_tokens: number;
+    last_active_date: string;
   };
 
   $: tokensK = (usage.today_tokens / 1000).toFixed(1);
@@ -22,13 +23,25 @@
   $: sparkMax = Math.max(...usage.weekly_daily, 1);
   $: usageColor = usage.usage_percent >= 80 ? '#ef4444' : usage.usage_percent >= 50 ? '#f59e0b' : '#4ade80';
 
+  $: todayStr = new Date().toISOString().slice(0, 10);
+  $: isOldData = usage.last_active_date && usage.last_active_date !== todayStr;
+  $: shortDate = isOldData ? formatShortDate(usage.last_active_date) : '';
+
+  function formatShortDate(dateStr: string): string {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
   const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 </script>
 
 <div class="grid">
+  {#if isOldData}
+    <div class="old-data-banner">📅 Data from: {shortDate}</div>
+  {/if}
   <!-- Today's Activity -->
   <section class="card">
-    <h2>⚡ Today's Activity</h2>
+    <h2>⚡ {isOldData ? 'Latest Activity' : "Today's Activity"}</h2>
     <div class="big-num">{usage.today_messages}<span class="unit">msg</span></div>
     <div class="stat-row">
       <span>🔧 {usage.today_tool_calls} tools</span>
@@ -38,7 +51,7 @@
 
   <!-- Tokens Today -->
   <section class="card">
-    <h2>📊 Tokens Today</h2>
+    <h2>📊 {isOldData ? `Tokens (${shortDate})` : 'Tokens Today'}</h2>
     <div class="big-num">{tokensK}<span class="unit">k</span></div>
     <div class="model-bar">
       {#if usage.opus_tokens > 0}
@@ -87,6 +100,17 @@
 </div>
 
 <style>
+  .old-data-banner {
+    grid-column: 1 / -1;
+    background: #2a2a1a;
+    border: 1px solid #4a4a2a;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: #f59e0b;
+    text-align: center;
+  }
+
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
