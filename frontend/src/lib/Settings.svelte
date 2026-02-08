@@ -83,6 +83,11 @@
   {#if error}
     <div class="error">{error}</div>
   {/if}
+
+  <div class="disclaimer">
+    ⚠️ BurnRate is not affiliated with or endorsed by Anthropic.
+    This is an unofficial, community-built tool.
+  </div>
 </div>
 
 <style>
@@ -195,5 +200,13 @@
     color: #ef4444;
     font-size: 11px;
     text-align: center;
+  }
+
+  .disclaimer {
+    font-size: 9px;
+    color: #5a5a7a;
+    text-align: center;
+    padding: 8px 4px 0;
+    line-height: 1.4;
   }
 </style>

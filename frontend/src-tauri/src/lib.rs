@@ -138,9 +138,10 @@ fn open_claude_login(app: AppHandle) -> Result<(), String> {
 /// Wake a hidden scraper WebView so macOS doesn't suspend its WebProcess.
 /// Moves offscreen, shows at 1x1, waits for wake, then caller can eval().
 fn wake_scraper_window(window: &tauri::WebviewWindow) {
-    log("Waking scraper window: moving offscreen + show");
-    let _ = window.set_position(tauri::PhysicalPosition::new(-10000i32, -10000i32));
-    let _ = window.set_size(tauri::PhysicalSize::new(1u32, 1u32));
+    log("Waking scraper window: moving offscreen (full size) + show");
+    // Use a reasonable size so macOS actually renders the page (1x1 causes blank content)
+    let _ = window.set_size(tauri::PhysicalSize::new(900u32, 700u32));
+    let _ = window.set_position(tauri::PhysicalPosition::new(-20000i32, -20000i32));
     let _ = window.show();
 }
 
@@ -281,6 +282,18 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
     .build()
     .map_err(|e| e.to_string())?;
 
+    // Prevent scraper window from being destroyed on close — hide instead
+    if let Some(w) = app.get_webview_window("scraper") {
+        let window = w.clone();
+        w.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+                log("Scraper window close intercepted — hidden instead");
+            }
+        });
+    }
+
     Ok(())
 }
 
@@ -322,7 +335,7 @@ fn format_tray_title(usage: &UsageData, failed_polls: u32) -> String {
             if mins == 0 {
                 format!(" {}h", hours)
             } else {
-                format!(" {}h{}m", hours, mins)
+                format!(" {}h {}m", hours, mins)
             }
         };
         format!(
