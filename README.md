@@ -2,9 +2,13 @@
 
 A macOS menu bar app that tracks your Claude Pro usage in real-time — session limits, weekly caps, and extra usage costs at a glance.
 
-![BurnRate Menu Bar](docs/menubar.png)
+<p align="center">
+  <img src="docs/menubar.png" alt="BurnRate Menu Bar" width="400">
+</p>
 
-![BurnRate Dashboard](docs/dashboard.png)
+<p align="center">
+  <img src="docs/dashboard.png" alt="BurnRate Dashboard" width="360">
+</p>
 
 ## Why?
 
@@ -73,7 +77,9 @@ Output: `frontend/src-tauri/target/release/bundle/macos/BurnRate.app`
 
 ## Settings
 
-![BurnRate Settings](docs/settings.png)
+<p align="center">
+  <img src="docs/settings.png" alt="BurnRate Settings" width="360">
+</p>
 
 Click tray icon → Dashboard → ⚙️ Settings:
 
