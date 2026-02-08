@@ -9,6 +9,22 @@ use tauri::{
     AppHandle, Emitter, Manager, State, Url,
 };
 
+fn log(msg: &str) {
+    use std::io::Write;
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+    let line = format!("[{}] [BurnRate] {}\n", ts, msg);
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join("burnrate-debug.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageData {
     pub session_percent: f64,
@@ -80,6 +96,7 @@ struct WebScrapedData {
 pub struct AppState {
     pub usage: Mutex<UsageData>,
     pub config: Mutex<AppConfig>,
+    pub failed_polls: Mutex<u32>,
 }
 
 #[tauri::command]
@@ -118,27 +135,42 @@ fn open_claude_login(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Wake a hidden scraper WebView so macOS doesn't suspend its WebProcess.
+/// Moves offscreen, shows at 1x1, waits for wake, then caller can eval().
+fn wake_scraper_window(window: &tauri::WebviewWindow) {
+    log("Waking scraper window: moving offscreen + show");
+    let _ = window.set_position(tauri::PhysicalPosition::new(-10000i32, -10000i32));
+    let _ = window.set_size(tauri::PhysicalSize::new(1u32, 1u32));
+    let _ = window.show();
+}
+
+/// Hide the scraper window again after scraping.
+fn sleep_scraper_window(window: &tauri::WebviewWindow) {
+    log("Hiding scraper window again");
+    let _ = window.hide();
+}
+
 #[tauri::command]
 async fn trigger_scrape(app: AppHandle) -> Result<UsageData, String> {
-    // Ensure scraper window exists
     if app.get_webview_window("scraper").is_none() {
         build_scraper_window(&app, false)?;
         tokio::time::sleep(std::time::Duration::from_secs(8)).await;
     }
 
     if let Some(window) = app.get_webview_window("scraper") {
-        // Navigate to usage page
+        wake_scraper_window(&window);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
         let _ = window.eval(
             "if (!window.location.href.includes('/settings/usage')) { window.location.href = 'https://claude.ai/settings/usage'; }"
         );
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        // Inject scraping JS
         let js = build_scrape_inject_js();
         let _ = window.eval(&js);
-
-        // Wait for navigation handler to process
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        sleep_scraper_window(&window);
     }
 
     let state = app.state::<AppState>();
@@ -149,6 +181,7 @@ async fn trigger_scrape(app: AppHandle) -> Result<UsageData, String> {
 /// Build the scraper WebView window with on_navigation handler
 fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
     let app_handle = app.clone();
+    log(&format!("Building scraper window, visible={}", visible));
 
     tauri::WebviewWindowBuilder::new(
         app,
@@ -165,11 +198,17 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
 
         // Intercept burnrate://result/<base64> URLs
         if url_str.starts_with("burnrate://result/") {
+            log("on_navigation: received burnrate://result/");
             let encoded = &url_str["burnrate://result/".len()..];
             if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) {
                 if let Ok(json_str) = String::from_utf8(bytes) {
+                    log(&format!("Decoded JSON: {}", &json_str[..json_str.len().min(300)]));
                     if let Ok(scraped) = serde_json::from_str::<WebScrapedData>(&json_str) {
                         if scraped.error.is_none() {
+                            log(&format!(
+                                "Parse success: session={}%, weekly={}%, reset={}min",
+                                scraped.session_percent, scraped.weekly_all_percent, scraped.session_reset_minutes
+                            ));
                             let now = chrono::Utc::now().format("%H:%M:%S").to_string();
                             let state = app_handle.state::<AppState>();
                             {
@@ -183,29 +222,38 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
                                 usage.web_connected = true;
                                 usage.last_updated = now;
                             }
+                            // Reset failed polls on success
+                            {
+                                let mut fp = state.failed_polls.lock().unwrap();
+                                *fp = 0;
+                            }
 
-                            // Update tray and emit
                             let data = state.usage.lock().unwrap().clone();
-                            let title = format_tray_title(&data);
+                            let failed = *state.failed_polls.lock().unwrap();
+                            let title = format_tray_title(&data, failed);
                             if let Some(tray) = app_handle.tray_by_id("main-tray") {
                                 let _ = tray.set_title(Some(&title));
                             }
                             let _ = app_handle.emit("usage-updated", &data);
+                        } else {
+                            log(&format!("Scrape returned error: {:?}", scraped.error));
                         }
+                    } else {
+                        log("Failed to parse JSON from scraper");
                     }
                 }
             }
-            return false; // Don't navigate to burnrate:// URL
+            return false;
         }
 
-        // After login, if user lands on claude.ai main page, redirect to usage
-        // This handles: claude.ai, claude.ai/new, claude.ai/chat*, etc.
+        // After login, redirect to usage page
         if (url_str == "https://claude.ai/"
             || url_str == "https://claude.ai"
             || url_str.starts_with("https://claude.ai/new")
             || url_str.starts_with("https://claude.ai/chat"))
             && !url_str.contains("/settings/")
         {
+            log("User landed on main page, redirecting to usage...");
             let handle = app_handle.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -215,7 +263,19 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
             });
         }
 
-        // Allow all normal navigation (https, http, about, etc.)
+        // When landing on usage page, auto-inject scraping JS after delay
+        if url_str.contains("/settings/usage") {
+            log("Landed on usage page, will auto-inject scraping JS...");
+            let handle = app_handle.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if let Some(w) = handle.get_webview_window("scraper") {
+                    let js = build_scrape_inject_js_static();
+                    let _ = w.eval(&js);
+                }
+            });
+        }
+
         true
     })
     .build()
@@ -242,7 +302,15 @@ fn build_scrape_inject_js() -> String {
     )
 }
 
-fn format_tray_title(usage: &UsageData) -> String {
+/// Same as build_scrape_inject_js but can be called from any context
+fn build_scrape_inject_js_static() -> String {
+    build_scrape_inject_js()
+}
+
+fn format_tray_title(usage: &UsageData, failed_polls: u32) -> String {
+    if failed_polls >= 3 {
+        return "⚠️ Login required".to_string();
+    }
     if usage.web_connected {
         let reset_str = if usage.session_reset_minutes <= 0 {
             String::new()
@@ -280,6 +348,8 @@ fn start_polling(app: AppHandle) {
                 v
             };
 
+            log("Poll start");
+
             // Read local data
             let (msgs, tokens, opus, sonnet) = usage::read_local_usage();
             let now = chrono::Utc::now().format("%H:%M:%S").to_string();
@@ -296,29 +366,74 @@ fn start_polling(app: AppHandle) {
 
             // Try web scraping - create scraper window if needed
             if app.get_webview_window("scraper").is_none() {
-                let _ = build_scraper_window(&app, false);
+                // Check if we've ever connected — if not, show the window for login
+                let ever_connected = app.state::<AppState>().usage.lock().unwrap().web_connected;
+                let show = !ever_connected;
+                log(&format!("Scraper window missing, creating (visible={})...", show));
+                let _ = build_scraper_window(&app, show);
                 tokio::time::sleep(std::time::Duration::from_secs(8)).await;
             }
+
+            // Record web_connected before scrape to detect if on_navigation fires
+            let was_updated = {
+                let state = app.state::<AppState>();
+                let v = state.usage.lock().unwrap().last_updated.clone();
+                v
+            };
+
             if let Some(window) = app.get_webview_window("scraper") {
-                // Navigate to usage page if needed
-                let _ = window.eval(
-                    "if (!window.location.href.includes('/settings/usage')) { window.location.href = 'https://claude.ai/settings/usage'; }"
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // Check if window is visible (user might be logging in)
+                let is_visible = window.is_visible().unwrap_or(false);
+                let is_connected = app.state::<AppState>().usage.lock().unwrap().web_connected;
 
-                // Inject scraping JS — result comes back via on_navigation handler
-                let js = build_scrape_inject_js();
-                let _ = window.eval(&js);
+                if !is_connected && is_visible {
+                    // Window is visible and not connected = user is logging in, don't interfere
+                    log("Scraper visible but not connected — waiting for user login");
+                } else {
+                    // Either connected (do regular scrape) or hidden (wake + scrape)
+                    if !is_visible {
+                        wake_scraper_window(&window);
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
 
-                // Wait for navigation handler to process
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    // Force navigate to usage page
+                    log("Force navigating to usage page");
+                    let _ = window.eval(
+                        "window.location.href = 'https://claude.ai/settings/usage';"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+
+                    log("Injecting scraping JS");
+                    let js = build_scrape_inject_js();
+                    let _ = window.eval(&js);
+
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                    // Hide if it was hidden before
+                    if !is_visible {
+                        sleep_scraper_window(&window);
+                    }
+                }
+            }
+
+            // Check if scrape succeeded by comparing last_updated
+            {
+                let state = app.state::<AppState>();
+                let current_updated = state.usage.lock().unwrap().last_updated.clone();
+                if current_updated == was_updated {
+                    // No update happened — increment failed polls
+                    let mut fp = state.failed_polls.lock().unwrap();
+                    *fp += 1;
+                    log(&format!("Scrape did not update data, failed_polls={}", *fp));
+                }
             }
 
             // Update tray and emit
             {
                 let state = app.state::<AppState>();
                 let data = state.usage.lock().unwrap().clone();
-                let title = format_tray_title(&data);
+                let failed = *state.failed_polls.lock().unwrap();
+                let title = format_tray_title(&data, failed);
                 if let Some(tray) = app.tray_by_id("main-tray") {
                     let _ = tray.set_title(Some(&title));
                 }
@@ -338,6 +453,7 @@ pub fn run() {
         .manage(AppState {
             usage: Mutex::new(UsageData::default()),
             config: Mutex::new(AppConfig::default()),
+            failed_polls: Mutex::new(0),
         })
         .setup(|app| {
             let show = MenuItemBuilder::with_id("show", "Dashboard").build(app)?;
@@ -406,6 +522,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            log("BurnRate started, beginning polling");
             start_polling(app.handle().clone());
             Ok(())
         })
