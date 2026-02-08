@@ -1,120 +1,192 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
   import ProgressBar from './ProgressBar.svelte';
 
   export let usage: {
+    session_percent: number;
+    session_reset_minutes: number;
+    weekly_all_percent: number;
+    weekly_sonnet_percent: number;
+    monthly_cost: number;
+    monthly_limit: number;
     today_messages: number;
-    today_tool_calls: number;
-    today_sessions: number;
     today_tokens: number;
     opus_tokens: number;
     sonnet_tokens: number;
-    weekly_daily: number[];
-    weekly_messages: number;
-    usage_percent: number;
-    last5h_tokens: number;
-    last_active_date: string;
+    web_connected: boolean;
+    last_updated: string;
   };
 
   $: tokensK = (usage.today_tokens / 1000).toFixed(1);
   $: opusK = (usage.opus_tokens / 1000).toFixed(1);
   $: sonnetK = (usage.sonnet_tokens / 1000).toFixed(1);
-  $: last5hK = (usage.last5h_tokens / 1000).toFixed(1);
-  $: weeklyTotalK = (usage.weekly_daily.reduce((a, b) => a + b, 0) / 1000).toFixed(0);
-  $: sparkMax = Math.max(...usage.weekly_daily, 1);
-  $: usageColor = usage.usage_percent >= 80 ? '#ef4444' : usage.usage_percent >= 50 ? '#f59e0b' : '#4ade80';
+  $: sessionColor = usage.session_percent >= 80 ? '#ef4444' : usage.session_percent >= 50 ? '#f59e0b' : '#4ade80';
+  $: weeklyColor = usage.weekly_all_percent >= 80 ? '#ef4444' : usage.weekly_all_percent >= 50 ? '#f59e0b' : '#818cf8';
+  $: sonnetColor = usage.weekly_sonnet_percent >= 80 ? '#ef4444' : usage.weekly_sonnet_percent >= 50 ? '#f59e0b' : '#38bdf8';
+  $: monthlyPercent = usage.monthly_limit > 0 ? (usage.monthly_cost / usage.monthly_limit) * 100 : 0;
+  $: monthlyColor = monthlyPercent >= 80 ? '#ef4444' : monthlyPercent >= 50 ? '#f59e0b' : '#4ade80';
 
-  $: todayStr = new Date().toISOString().slice(0, 10);
-  $: isOldData = usage.last_active_date && usage.last_active_date !== todayStr;
-  $: shortDate = isOldData ? formatShortDate(usage.last_active_date) : '';
+  $: resetDisplay = formatReset(usage.session_reset_minutes);
 
-  function formatShortDate(dateStr: string): string {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  function formatReset(minutes: number): string {
+    if (minutes <= 0) return '';
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
   }
 
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  // Days remaining in month
+  $: daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  $: dayOfMonth = new Date().getDate();
+  $: daysRemaining = daysInMonth - dayOfMonth;
+
+  async function openLogin() {
+    try {
+      await invoke('open_claude_login');
+    } catch (e) {
+      console.error('Failed to open login:', e);
+    }
+  }
 </script>
 
 <div class="grid">
-  {#if isOldData}
-    <div class="old-data-banner">📅 Data from: {shortDate}</div>
-  {/if}
-  <!-- Today's Activity -->
-  <section class="card">
-    <h2>⚡ {isOldData ? 'Latest Activity' : "Today's Activity"}</h2>
-    <div class="big-num">{usage.today_messages}<span class="unit">msg</span></div>
-    <div class="stat-row">
-      <span>🔧 {usage.today_tool_calls} tools</span>
-      <span>📂 {usage.today_sessions} sessions</span>
+  {#if !usage.web_connected}
+    <div class="login-banner" on:click={openLogin}>
+      🔑 Not connected to Claude — <button class="link-btn" on:click={openLogin}>Login</button>
     </div>
+  {:else}
+    <div class="connected-banner">
+      ✅ Connected {#if usage.last_updated}· Updated {usage.last_updated}{/if}
+    </div>
+  {/if}
+
+  <!-- Session -->
+  <section class="card">
+    <h2>⚡ Session</h2>
+    {#if usage.web_connected}
+      <div class="big-num" style="color: {sessionColor}">
+        {usage.session_percent.toFixed(0)}<span class="unit">%</span>
+      </div>
+      <ProgressBar value={usage.session_percent} color={sessionColor} warningAt={50} dangerAt={80} />
+      {#if resetDisplay}
+        <div class="stat-row">
+          <span>🔄 Reset in {resetDisplay}</span>
+        </div>
+      {/if}
+    {:else}
+      <div class="placeholder">Login required</div>
+    {/if}
   </section>
 
-  <!-- Tokens Today -->
+  <!-- Weekly -->
   <section class="card">
-    <h2>📊 {isOldData ? `Tokens (${shortDate})` : 'Tokens Today'}</h2>
-    <div class="big-num">{tokensK}<span class="unit">k</span></div>
+    <h2>📅 Weekly</h2>
+    {#if usage.web_connected}
+      <div class="sub-metric">
+        <span class="sub-label">All models</span>
+        <span class="sub-value" style="color: {weeklyColor}">{usage.weekly_all_percent.toFixed(0)}%</span>
+      </div>
+      <ProgressBar value={usage.weekly_all_percent} color={weeklyColor} warningAt={50} dangerAt={80} />
+      <div class="sub-metric" style="margin-top: 8px;">
+        <span class="sub-label">Sonnet</span>
+        <span class="sub-value" style="color: {sonnetColor}">{usage.weekly_sonnet_percent.toFixed(0)}%</span>
+      </div>
+      <ProgressBar value={usage.weekly_sonnet_percent} color={sonnetColor} warningAt={50} dangerAt={80} />
+    {:else}
+      <div class="placeholder">Login required</div>
+    {/if}
+  </section>
+
+  <!-- Monthly -->
+  <section class="card">
+    <h2>💰 Monthly</h2>
+    {#if usage.web_connected && usage.monthly_limit > 0}
+      <div class="big-num" style="color: {monthlyColor}">
+        ${usage.monthly_cost.toFixed(2)}<span class="unit">/ ${usage.monthly_limit.toFixed(0)}</span>
+      </div>
+      <ProgressBar value={monthlyPercent} color={monthlyColor} warningAt={50} dangerAt={80} />
+      <div class="stat-row">
+        <span>{daysRemaining} days left</span>
+        <span>{monthlyPercent.toFixed(0)}%</span>
+      </div>
+    {:else if usage.web_connected}
+      <div class="big-num" style="color: {monthlyColor}">
+        ${usage.monthly_cost.toFixed(2)}
+      </div>
+      <div class="stat-row"><span>{daysRemaining} days left</span></div>
+    {:else}
+      <div class="placeholder">Login required</div>
+    {/if}
+  </section>
+
+  <!-- Local Activity -->
+  <section class="card">
+    <h2>📊 Local Activity</h2>
+    <div class="big-num">{usage.today_messages}<span class="unit">msg</span></div>
+    <div class="stat-row">
+      <span>{tokensK}k tokens</span>
+    </div>
     <div class="model-bar">
       {#if usage.opus_tokens > 0}
-        <div class="bar-segment opus" style="flex: {usage.opus_tokens}" title="Opus: {opusK}k"></div>
+        <div class="bar-segment opus" style="flex: {usage.opus_tokens}"></div>
       {/if}
       {#if usage.sonnet_tokens > 0}
-        <div class="bar-segment sonnet" style="flex: {usage.sonnet_tokens}" title="Sonnet: {sonnetK}k"></div>
+        <div class="bar-segment sonnet" style="flex: {usage.sonnet_tokens}"></div>
       {/if}
       {#if usage.opus_tokens === 0 && usage.sonnet_tokens === 0}
         <div class="bar-segment empty"></div>
       {/if}
     </div>
     <div class="stat-row legend">
-      <span><i class="dot opus"></i>Opus {opusK}k</span>
-      <span><i class="dot sonnet"></i>Sonnet {sonnetK}k</span>
-    </div>
-  </section>
-
-  <!-- Weekly Trend -->
-  <section class="card">
-    <h2>📅 Weekly Trend</h2>
-    <div class="sparkline">
-      {#each usage.weekly_daily as val, i}
-        <div class="spark-col">
-          <div class="spark-bar" style="height: {Math.max((val / sparkMax) * 40, 2)}px"></div>
-          <span class="spark-label">{dayLabels[i]}</span>
-        </div>
-      {/each}
-    </div>
-    <div class="stat-row">
-      <span>{weeklyTotalK}k tokens</span>
-      <span>{usage.weekly_messages} msg</span>
-    </div>
-  </section>
-
-  <!-- Estimated Usage -->
-  <section class="card">
-    <h2>💰 Estimated Usage</h2>
-    <div class="big-num" style="color: {usageColor}">{usage.usage_percent.toFixed(0)}<span class="unit">%</span></div>
-    <ProgressBar value={usage.usage_percent} color={usageColor} warningAt={50} dangerAt={80} />
-    <div class="stat-row">
-      <span>{last5hK}k / 5h window</span>
-      <span class="estimated-label">⚠️ Estimated</span>
+      <span><i class="dot opus"></i>{opusK}k</span>
+      <span><i class="dot sonnet"></i>{sonnetK}k</span>
     </div>
   </section>
 </div>
 
 <style>
-  .old-data-banner {
-    grid-column: 1 / -1;
-    background: #2a2a1a;
-    border: 1px solid #4a4a2a;
-    border-radius: 8px;
-    padding: 4px 10px;
-    font-size: 11px;
-    color: #f59e0b;
-    text-align: center;
-  }
-
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
+  }
+
+  .login-banner {
+    grid-column: 1 / -1;
+    background: #2a1a1a;
+    border: 1px solid #4a2a2a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #f59e0b;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .login-banner:hover {
+    background: #3a2a2a;
+  }
+
+  .connected-banner {
+    grid-column: 1 / -1;
+    background: #1a2a1a;
+    border: 1px solid #2a4a2a;
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 10px;
+    color: #4ade80;
+    text-align: center;
+  }
+
+  .link-btn {
+    background: none;
+    border: none;
+    color: #818cf8;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
   }
 
   .card {
@@ -126,7 +198,7 @@
 
   h2 {
     font-size: 11px;
-    margin: 0 0 4px 0;
+    margin: 0 0 6px 0;
     font-weight: 600;
     color: #8a8aaa;
   }
@@ -144,6 +216,23 @@
     margin-left: 2px;
   }
 
+  .sub-metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+  }
+
+  .sub-label {
+    font-size: 11px;
+    color: #8a8aaa;
+  }
+
+  .sub-value {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
   .stat-row {
     display: flex;
     justify-content: space-between;
@@ -152,13 +241,20 @@
     margin-top: 4px;
   }
 
+  .placeholder {
+    color: #5a5a7a;
+    font-size: 12px;
+    text-align: center;
+    padding: 16px 0;
+  }
+
   .model-bar {
     display: flex;
     height: 6px;
     border-radius: 3px;
     overflow: hidden;
     background: #2a2a4a;
-    margin-bottom: 4px;
+    margin: 4px 0;
   }
 
   .bar-segment {
@@ -185,39 +281,4 @@
 
   .dot.opus { background: #818cf8; }
   .dot.sonnet { background: #38bdf8; }
-
-  .sparkline {
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-    height: 50px;
-    margin-bottom: 4px;
-  }
-
-  .spark-col {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
-  .spark-bar {
-    width: 100%;
-    background: #818cf8;
-    border-radius: 2px;
-    min-height: 2px;
-    transition: height 0.3s;
-  }
-
-  .spark-label {
-    font-size: 8px;
-    color: #5a5a7a;
-    margin-top: 2px;
-  }
-
-  .estimated-label {
-    color: #f59e0b;
-    font-size: 9px;
-  }
 </style>

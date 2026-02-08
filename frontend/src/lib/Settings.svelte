@@ -2,12 +2,10 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
 
-  let pollInterval = 30;
+  let pollInterval = 60;
   let displayMode = 'all';
   let saved = false;
   let error = '';
-  let claudeDir = '~/.claude/';
-  let hasClaudeData = true;
 
   onMount(async () => {
     try {
@@ -35,16 +33,46 @@
       error = e.toString();
     }
   }
+
+  async function openLogin() {
+    try {
+      await invoke('open_claude_login');
+    } catch (e) {
+      console.error('Failed to open login:', e);
+    }
+  }
+
+  async function hideScraper() {
+    try {
+      await invoke('hide_scraper');
+    } catch (e) {
+      console.error(e);
+    }
+  }
 </script>
 
 <div class="settings">
   <section class="card">
-    <h2>📁 Data Source</h2>
+    <h2>🔑 Claude Connection</h2>
     <div class="info">
-      Reading from <code>{claudeDir}</code>
+      Scrapes usage data from <code>claude.ai/settings/usage</code>
+    </div>
+    <div class="btn-row">
+      <button class="action-btn" on:click={openLogin}>Login to Claude</button>
+      <button class="action-btn secondary" on:click={hideScraper}>Hide Browser</button>
     </div>
     <div class="info dim">
-      stats-cache.json + session JSONL files
+      Login opens a browser window. After login, it scrapes automatically.
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>📁 Local Data</h2>
+    <div class="info">
+      Also reads from <code>~/.claude/</code> for local activity
+    </div>
+    <div class="info dim">
+      Session JSONL files for message/token counts
     </div>
   </section>
 
@@ -53,7 +81,6 @@
     <label>
       <span>Poll interval</span>
       <select bind:value={pollInterval}>
-        <option value={10}>10s</option>
         <option value={30}>30s</option>
         <option value={60}>1 min</option>
         <option value={120}>2 min</option>
@@ -114,6 +141,36 @@
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 11px;
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0;
+  }
+
+  .action-btn {
+    flex: 1;
+    padding: 8px;
+    background: #818cf8;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .action-btn:hover {
+    background: #6366f1;
+  }
+
+  .action-btn.secondary {
+    background: #2a2a4a;
+    color: #e0e0e0;
+  }
+
+  .action-btn.secondary:hover {
+    background: #3a3a5a;
   }
 
   label {

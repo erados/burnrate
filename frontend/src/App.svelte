@@ -6,29 +6,33 @@
   import Settings from './lib/Settings.svelte';
 
   interface UsageData {
+    session_percent: number;
+    session_reset_minutes: number;
+    weekly_all_percent: number;
+    weekly_sonnet_percent: number;
+    monthly_cost: number;
+    monthly_limit: number;
     today_messages: number;
-    today_tool_calls: number;
-    today_sessions: number;
     today_tokens: number;
     opus_tokens: number;
     sonnet_tokens: number;
-    weekly_daily: number[];
-    weekly_messages: number;
-    usage_percent: number;
-    last5h_tokens: number;
+    web_connected: boolean;
+    last_updated: string;
   }
 
   let usage: UsageData = {
+    session_percent: 0,
+    session_reset_minutes: 0,
+    weekly_all_percent: 0,
+    weekly_sonnet_percent: 0,
+    monthly_cost: 0,
+    monthly_limit: 0,
     today_messages: 0,
-    today_tool_calls: 0,
-    today_sessions: 0,
     today_tokens: 0,
     opus_tokens: 0,
     sonnet_tokens: 0,
-    weekly_daily: [0, 0, 0, 0, 0, 0, 0],
-    weekly_messages: 0,
-    usage_percent: 0,
-    last5h_tokens: 0,
+    web_connected: false,
+    last_updated: '',
   };
 
   let showSettings = false;
@@ -82,7 +86,7 @@
 
   main {
     padding: 16px;
-    max-width: 400px;
+    max-width: 420px;
     margin: 0 auto;
   }
 
