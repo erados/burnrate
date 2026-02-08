@@ -6,37 +6,41 @@
   import Settings from './lib/Settings.svelte';
 
   interface UsageData {
-    session_percent: number;
-    session_reset_minutes: number;
-    weekly_all_percent: number;
-    weekly_sonnet_percent: number;
-    weekly_reset_hours: number;
-    monthly_cost: number;
-    monthly_limit: number;
+    today_messages: number;
+    today_tool_calls: number;
+    today_sessions: number;
+    today_tokens: number;
+    opus_tokens: number;
+    sonnet_tokens: number;
+    weekly_daily: number[];
+    weekly_messages: number;
+    usage_percent: number;
+    last5h_tokens: number;
   }
 
   let usage: UsageData = {
-    session_percent: 0,
-    session_reset_minutes: 0,
-    weekly_all_percent: 0,
-    weekly_sonnet_percent: 0,
-    weekly_reset_hours: 0,
-    monthly_cost: 0,
-    monthly_limit: 50,
+    today_messages: 0,
+    today_tool_calls: 0,
+    today_sessions: 0,
+    today_tokens: 0,
+    opus_tokens: 0,
+    sonnet_tokens: 0,
+    weekly_daily: [0, 0, 0, 0, 0, 0, 0],
+    weekly_messages: 0,
+    usage_percent: 0,
+    last5h_tokens: 0,
   };
 
   let showSettings = false;
   let unlisten: (() => void) | null = null;
 
   onMount(async () => {
-    // Get initial data
     try {
       usage = await invoke('get_usage');
     } catch (e) {
       console.error('Failed to get usage:', e);
     }
 
-    // Listen for updates
     unlisten = await listen<UsageData>('usage-updated', (event) => {
       usage = event.payload;
     });

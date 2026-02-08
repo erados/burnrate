@@ -2,31 +2,21 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
 
-  let apiKey = '';
-  let orgId = '';
-  let pollInterval = 300;
-  let monthlyLimit = 50;
-  let sessionThreshold = 80;
-  let monthlyThreshold = 90;
+  let pollInterval = 30;
   let displayMode = 'all';
   let saved = false;
   let error = '';
+  let claudeDir = '~/.claude/';
+  let hasClaudeData = true;
 
   onMount(async () => {
     try {
       const config: any = await invoke('get_config');
-      orgId = config.org_id;
       pollInterval = config.poll_interval_secs;
-      monthlyLimit = config.monthly_limit;
-      sessionThreshold = config.session_alert_threshold;
-      monthlyThreshold = config.monthly_alert_threshold;
       displayMode = config.display_mode;
     } catch (e) {
       console.error('Failed to load config:', e);
     }
-    try {
-      apiKey = await invoke('load_api_key');
-    } catch {}
   });
 
   async function save() {
@@ -35,12 +25,7 @@
     try {
       await invoke('save_config', {
         config: {
-          api_key: apiKey,
-          org_id: orgId,
           poll_interval_secs: pollInterval,
-          monthly_limit: monthlyLimit,
-          session_alert_threshold: sessionThreshold,
-          monthly_alert_threshold: monthlyThreshold,
           display_mode: displayMode,
         },
       });
@@ -53,57 +38,39 @@
 </script>
 
 <div class="settings">
-  <div class="grid">
-    <section class="card">
-      <h2>🔑 API</h2>
-      <label>
-        <span>API Key</span>
-        <input type="password" bind:value={apiKey} placeholder="sk-ant-..." />
-      </label>
-      <label>
-        <span>Org ID</span>
-        <input type="text" bind:value={orgId} placeholder="org-..." />
-      </label>
-    </section>
+  <section class="card">
+    <h2>📁 Data Source</h2>
+    <div class="info">
+      Reading from <code>{claudeDir}</code>
+    </div>
+    <div class="info dim">
+      stats-cache.json + session JSONL files
+    </div>
+  </section>
 
-    <section class="card">
-      <h2>⚙️ Preferences</h2>
-      <label>
-        <span>Poll (sec)</span>
-        <input type="number" bind:value={pollInterval} min="60" max="3600" step="60" />
-      </label>
-      <label>
-        <span>Budget ($)</span>
-        <input type="number" bind:value={monthlyLimit} min="1" step="5" />
-      </label>
-    </section>
-
-    <section class="card">
-      <h2>🔔 Alerts</h2>
-      <label>
-        <span>Session (%)</span>
-        <input type="number" bind:value={sessionThreshold} min="50" max="100" />
-      </label>
-      <label>
-        <span>Monthly (%)</span>
-        <input type="number" bind:value={monthlyThreshold} min="50" max="100" />
-      </label>
-    </section>
-
-    <section class="card">
-      <h2>🖥️ Display</h2>
-      <label>
-        <span>Mode</span>
-        <select bind:value={displayMode}>
-          <option value="all">All metrics</option>
-          <option value="critical">Critical only</option>
-        </select>
-      </label>
-    </section>
-  </div>
+  <section class="card">
+    <h2>⚙️ Preferences</h2>
+    <label>
+      <span>Poll interval</span>
+      <select bind:value={pollInterval}>
+        <option value={10}>10s</option>
+        <option value={30}>30s</option>
+        <option value={60}>1 min</option>
+        <option value={120}>2 min</option>
+        <option value={300}>5 min</option>
+      </select>
+    </label>
+    <label>
+      <span>Display</span>
+      <select bind:value={displayMode}>
+        <option value="all">All metrics</option>
+        <option value="compact">Compact</option>
+      </select>
+    </label>
+  </section>
 
   <button class="save-btn" on:click={save}>
-    {saved ? '✅ Saved!' : 'Save'}
+    {saved ? '✅ Saved!' : 'Save Settings'}
   </button>
 
   {#if error}
@@ -118,17 +85,11 @@
     gap: 8px;
   }
 
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
   .card {
     background: #16162a;
     border: 1px solid #2a2a4a;
     border-radius: 10px;
-    padding: 10px;
+    padding: 12px;
   }
 
   h2 {
@@ -138,22 +99,33 @@
     color: #8a8aaa;
   }
 
+  .info {
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+
+  .info.dim {
+    font-size: 10px;
+    color: #6a6a8a;
+  }
+
+  code {
+    background: #2a2a4a;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
   label {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
-    font-size: 11px;
+    margin-bottom: 8px;
+    font-size: 12px;
   }
 
-  label span {
-    flex-shrink: 0;
-    margin-right: 6px;
-  }
-
-  input, select {
-    width: 100px;
-    padding: 4px 6px;
+  select {
+    padding: 4px 8px;
     background: #1a1a2e;
     border: 1px solid #3a3a5a;
     border-radius: 5px;
@@ -161,14 +133,14 @@
     font-size: 11px;
   }
 
-  input:focus, select:focus {
+  select:focus {
     outline: none;
     border-color: #818cf8;
   }
 
   .save-btn {
     width: 100%;
-    padding: 8px;
+    padding: 10px;
     background: #818cf8;
     color: white;
     border: none;
