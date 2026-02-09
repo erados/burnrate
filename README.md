@@ -6,18 +6,13 @@
 
 A macOS menu bar app that tracks your Claude Pro/Max usage in real-time — so you never get rate-limited by surprise.
 
-<!-- TODO: Add demo GIF here
 <p align="center">
-  <img src="docs/demo.gif" alt="BurnRate Demo" width="600">
-</p>
--->
-
-<p align="center">
-  <img src="docs/menubar.png" alt="BurnRate Menu Bar" width="400">
+  <img src="screenshots/dashboard.png" alt="BurnRate Dashboard" width="360">
+  <img src="screenshots/settings.png" alt="BurnRate Settings" width="360">
 </p>
 
 <p align="center">
-  <img src="docs/dashboard.png" alt="BurnRate Dashboard" width="360">
+  <img src="screenshots/menubar.png" alt="BurnRate Menu Bar" width="300">
 </p>
 
 ## Why?
