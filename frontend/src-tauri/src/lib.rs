@@ -335,7 +335,7 @@ fn format_tray_title(usage: &UsageData, failed_polls: u32) -> String {
             if mins == 0 {
                 format!(" {}h", hours)
             } else {
-                format!(" {}h  {}m", hours, mins)
+                format!(" {}h {}m", hours, mins)
             }
         };
         format!(

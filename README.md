@@ -29,7 +29,7 @@ Claude Pro and Max have usage limits that reset on different schedules. You're m
 
 ## Features
 
-- **Menu bar at a glance**: `⚡41% 3h01m | 🔋11%` — session usage, reset countdown, weekly usage
+- **Menu bar at a glance**: `⚡41% 3h 01m | 🔋11%` — session usage, reset countdown, weekly usage
 - **Dashboard**: Click to see detailed breakdown with visual progress bars
 - **Session tracking**: Current session usage % with countdown to reset
 - **Weekly tracking**: All models + Sonnet-specific usage
@@ -50,7 +50,7 @@ BurnRate opens a hidden browser window, authenticates with your Claude account, 
 ## Menu Bar Format
 
 ```
-⚡41% 3h01m | 🔋11%
+⚡41% 3h 01m | 🔋11%
 │  │    │       │
 │  │    │       └─ Weekly all-models usage
 │  │    └───────── Time until session reset
