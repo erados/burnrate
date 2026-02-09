@@ -1,6 +1,16 @@
 # 🔥 BurnRate
 
-A macOS menu bar app that tracks your Claude Pro usage in real-time — session limits, weekly caps, and extra usage costs at a glance.
+[![GitHub release](https://img.shields.io/github/v/release/erados/burnrate)](https://github.com/erados/burnrate/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black?logo=apple)](https://github.com/erados/burnrate/releases)
+
+A macOS menu bar app that tracks your Claude Pro/Max usage in real-time — so you never get rate-limited by surprise.
+
+<!-- TODO: Add demo GIF here
+<p align="center">
+  <img src="docs/demo.gif" alt="BurnRate Demo" width="600">
+</p>
+-->
 
 <p align="center">
   <img src="docs/menubar.png" alt="BurnRate Menu Bar" width="400">
@@ -12,7 +22,15 @@ A macOS menu bar app that tracks your Claude Pro usage in real-time — session 
 
 ## Why?
 
-Claude Pro has usage limits that reset on different schedules. You're mid-conversation, deep in thought — then suddenly rate-limited. BurnRate sits in your menu bar so you always know where you stand.
+Claude Pro and Max have usage limits that reset on different schedules. You're mid-conversation, deep in thought — then suddenly rate-limited. BurnRate sits in your menu bar so you always know where you stand.
+
+## Quick Start
+
+1. Download `BurnRate_0.1.0_aarch64.dmg` from [Releases](https://github.com/erados/burnrate/releases)
+2. Open the DMG and drag to Applications
+3. Right-click → Open (not notarized yet)
+4. Sign in to Claude when prompted
+5. Done! Check your menu bar ⚡
 
 ## Features
 
@@ -20,10 +38,11 @@ Claude Pro has usage limits that reset on different schedules. You're mid-conver
 - **Dashboard**: Click to see detailed breakdown with visual progress bars
 - **Session tracking**: Current session usage % with countdown to reset
 - **Weekly tracking**: All models + Sonnet-specific usage
-- **Extra usage**: Monthly spend vs limit (e.g. `$39.37 / $50.00`)
+- **Extra usage**: Monthly spend vs limit (e.g. `$39.37 / $50.00`) — Max plan
 - **Background polling**: Auto-updates every 60 seconds
 - **Zero config**: Just log in to Claude once — no API keys needed
 - **Lightweight**: Native macOS app via Tauri, minimal CPU/memory
+- **Works with Claude Pro and Max** plans
 
 ## How It Works
 
@@ -56,15 +75,15 @@ After 3 failed polls:
 | **Weekly (Sonnet)** | Sonnet-specific usage tracking |
 | **Extra Usage** | Monthly spend vs limit (e.g. $39.37 / $50.00) |
 
-## Install
+## Settings
 
-### Download (macOS Apple Silicon)
+Click tray icon → Dashboard → ⚙️ Settings:
 
-Grab `BurnRate_0.1.0_aarch64.dmg` from [Releases](https://github.com/erados/burnrate/releases).
+- **Poll interval**: 30s / 1min / 2min / 5min
+- **Login to Claude**: Opens visible login window
+- **Logout**: Clears session, stops polling
 
-> ⚠️ **First launch**: Right-click → Open (or System Settings → Privacy → allow). The app is not notarized yet.
-
-### Build from source
+## Build from Source
 
 ```bash
 # Prerequisites: Rust, Node.js 18+
@@ -74,18 +93,6 @@ npx tauri build
 ```
 
 Output: `frontend/src-tauri/target/release/bundle/macos/BurnRate.app`
-
-## Settings
-
-<p align="center">
-  <img src="docs/settings.png" alt="BurnRate Settings" width="360">
-</p>
-
-Click tray icon → Dashboard → ⚙️ Settings:
-
-- **Poll interval**: 30s / 1min / 2min / 5min
-- **Login to Claude**: Opens visible login window
-- **Logout**: Clears session, stops polling
 
 ## Privacy & Security
 
@@ -107,6 +114,15 @@ Click tray icon → Dashboard → ⚙️ Settings:
 - Intel Mac build not yet available (ARM/Apple Silicon only)
 - Login cookies may not persist after macOS restart (WKWebView limitation)
 - Window briefly appears during initial login flow
+- Tested on Claude Max. Pro users: please [open an issue](https://github.com/erados/burnrate/issues) if anything looks off!
+
+## Contributing
+
+Issues and PRs welcome! If you'd like to contribute:
+
+1. Fork the repo
+2. Create a feature branch
+3. Submit a PR
 
 ## License
 
