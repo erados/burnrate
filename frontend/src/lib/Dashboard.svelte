@@ -1,6 +1,9 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount, onDestroy } from 'svelte';
   import ProgressBar from './ProgressBar.svelte';
+  import UsageChart from './UsageChart.svelte';
 
   export let usage: {
     session_percent: number;
@@ -16,6 +19,20 @@
     web_connected: boolean;
     last_updated: string;
   };
+
+  let history: any[] = [];
+  let unlisten: (() => void) | null = null;
+
+  async function loadHistory() {
+    try { history = await invoke('get_history'); } catch {}
+  }
+
+  onMount(async () => {
+    await loadHistory();
+    unlisten = await listen('usage-updated', () => { loadHistory(); });
+  });
+
+  onDestroy(() => { if (unlisten) unlisten(); });
 
   $: sessionColor = usage.session_percent >= 80 ? '#ef4444' : usage.session_percent >= 50 ? '#f59e0b' : '#4ade80';
   $: weeklyColor = usage.weekly_all_percent >= 80 ? '#ef4444' : usage.weekly_all_percent >= 50 ? '#f59e0b' : '#818cf8';
@@ -99,6 +116,9 @@
           ${usage.monthly_cost.toFixed(2)}<span class="unit">/ ${usage.monthly_limit.toFixed(0)}</span>
         </div>
         <ProgressBar value={monthlyPercent} color={monthlyColor} warningAt={50} dangerAt={80} />
+        <div class="remaining-row">
+          ${(usage.monthly_limit - usage.monthly_cost).toFixed(2)} remaining
+        </div>
       {:else}
         <div class="big-num" style="color: {monthlyColor}">
           ${usage.monthly_cost.toFixed(2)}<span class="unit">used</span>
@@ -109,6 +129,12 @@
     {:else}
       <div class="placeholder">Login required</div>
     {/if}
+  </section>
+
+  <!-- Usage History Chart -->
+  <section class="card chart-card">
+    <h2>📈 Usage History</h2>
+    <UsageChart {history} />
   </section>
 </div>
 
@@ -220,6 +246,17 @@
     font-size: 12px;
     text-align: center;
     padding: 16px 0;
+  }
+
+  .remaining-row {
+    font-size: 11px;
+    color: #4ade80;
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .chart-card {
+    grid-column: 1 / -1;
   }
 
 </style>

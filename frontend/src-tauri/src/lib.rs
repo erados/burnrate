@@ -1,3 +1,4 @@
+mod history;
 mod usage;
 
 use base64::Engine;
@@ -114,6 +115,11 @@ fn save_config(state: State<AppState>, config: AppConfig) -> Result<(), String> 
     let mut current = state.config.lock().unwrap();
     *current = config;
     Ok(())
+}
+
+#[tauri::command]
+fn get_history() -> Vec<history::HistoryEntry> {
+    history::load_history()
 }
 
 #[tauri::command]
@@ -236,6 +242,11 @@ fn build_scraper_window(app: &AppHandle, visible: bool) -> Result<(), String> {
                                 let _ = tray.set_title(Some(&title));
                             }
                             let _ = app_handle.emit("usage-updated", &data);
+                            history::append_entry(
+                                scraped.session_percent,
+                                scraped.weekly_all_percent,
+                                scraped.weekly_sonnet_percent,
+                            );
                         } else {
                             log(&format!("Scrape returned error: {:?}", scraped.error));
                         }
@@ -328,22 +339,53 @@ fn format_tray_title(usage: &UsageData, failed_polls: u32) -> String {
         let reset_str = if usage.session_reset_minutes <= 0 {
             String::new()
         } else if usage.session_reset_minutes < 60 {
-            format!(" {}m", usage.session_reset_minutes)
+            format!("{}m", usage.session_reset_minutes)
         } else {
             let hours = usage.session_reset_minutes / 60;
             let mins = usage.session_reset_minutes % 60;
             if mins == 0 {
-                format!(" {}h", hours)
+                format!("{}h", hours)
             } else {
-                format!(" {}h {}m", hours, mins)
+                format!("{}h{}m", hours, mins)
             }
         };
-        format!(
-            "⚡{}%{} | 🔋{}%",
-            usage.session_percent as i64,
-            reset_str,
-            usage.weekly_all_percent as i64,
-        )
+
+        // When session is at 100% and extra usage is active, show cost info
+        if usage.session_percent >= 100.0 && usage.monthly_cost > 0.0 && usage.monthly_limit > 0.0 {
+            let remaining = usage.monthly_limit - usage.monthly_cost;
+            let remaining_str = if remaining >= 0.0 {
+                format!("${:.0}left", remaining)
+            } else {
+                format!("-${:.0}over", -remaining)
+            };
+            if reset_str.is_empty() {
+                format!(
+                    "⚡100% 💰{} 🔋{}%",
+                    remaining_str,
+                    usage.weekly_all_percent as i64,
+                )
+            } else {
+                format!(
+                    "⚡100%({}) 💰{} 🔋{}%",
+                    reset_str,
+                    remaining_str,
+                    usage.weekly_all_percent as i64,
+                )
+            }
+        } else if reset_str.is_empty() {
+            format!(
+                "⚡{}% 🔋{}%",
+                usage.session_percent as i64,
+                usage.weekly_all_percent as i64,
+            )
+        } else {
+            format!(
+                "⚡{}%({}) 🔋{}%",
+                usage.session_percent as i64,
+                reset_str,
+                usage.weekly_all_percent as i64,
+            )
+        }
     } else {
         "🔥 loading...".to_string()
     }
@@ -543,6 +585,7 @@ pub fn run() {
             get_usage,
             get_config,
             save_config,
+            get_history,
             open_claude_login,
             hide_scraper,
             trigger_scrape,
