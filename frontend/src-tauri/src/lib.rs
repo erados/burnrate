@@ -350,25 +350,31 @@ fn format_tray_title(usage: &UsageData, failed_polls: u32) -> String {
             }
         };
 
-        // When session is at 100% and extra usage is active, show cost info
-        if usage.session_percent >= 100.0 && usage.monthly_cost > 0.0 && usage.monthly_limit > 0.0 {
-            let remaining = usage.monthly_limit - usage.monthly_cost;
-            let remaining_str = if remaining >= 0.0 {
-                format!("${:.0}left", remaining)
+        // When session is at 100%, show Extra Usage info
+        if usage.session_percent >= 100.0 {
+            let cost_str = if usage.monthly_limit > 0.0 {
+                let remaining = usage.monthly_limit - usage.monthly_cost;
+                if remaining >= 0.0 {
+                    format!("${:.0}left", remaining)
+                } else {
+                    format!("-${:.0}over", -remaining)
+                }
+            } else if usage.monthly_cost > 0.0 {
+                format!("${:.2}", usage.monthly_cost)
             } else {
-                format!("-${:.0}over", -remaining)
+                "active".to_string()
             };
             if reset_str.is_empty() {
                 format!(
                     "⚡100% 💰{} 🔋{}%",
-                    remaining_str,
+                    cost_str,
                     usage.weekly_all_percent as i64,
                 )
             } else {
                 format!(
                     "⚡100%({}) 💰{} 🔋{}%",
                     reset_str,
-                    remaining_str,
+                    cost_str,
                     usage.weekly_all_percent as i64,
                 )
             }
