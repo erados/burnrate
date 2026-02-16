@@ -11,12 +11,7 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [],
-    "trayIcon": {
-      "iconPath": "icons/tray-icon.png",
-      "iconAsTemplate": true,
-      "tooltip": "BurnRate - API Usage Monitor"
-    }
+    "windows": []
   },
   "bundle": {
     "active": true,
